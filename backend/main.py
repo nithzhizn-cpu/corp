@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from crypto.signal_core import (
@@ -18,7 +19,7 @@ from crypto.signal_core import (
     generate_onetime_prekeys,
     generate_ephemeral_key_b64,
     x3dh_sender,
-    RatchetState,        # ⚠ той самий dataclass, що й у signal_core.py
+    RatchetState,        # той самий dataclass, що й у signal_core.py
     ratchet_encrypt,
     ratchet_decrypt,
 )
@@ -31,13 +32,24 @@ app = FastAPI(title="Signal v7 Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "*",  # для тестів / фронтів на Railway; в проді краще вказати конкретні домени
-    ],
+    allow_origins=["*"],          # в проді краще вказати конкретні домени
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 🔁 Глобальний preflight handler (щоб браузер не падав по OPTIONS)
+@app.options("/{path:path}")
+async def preflight_handler(path: str):
+    return JSONResponse(
+        status_code=200,
+        content={"ok": True},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 # ============================================================
 #   ZERO-TRACE STORAGE (RAM only)
@@ -163,14 +175,11 @@ def session_init(data: InitiateSessionPayload):
     )
 
     # Symmetric double ratchet: два стани, дзеркальні
-    # s -> r: send = master + "A", recv = master + "B"
     SESSIONS[(s, r)] = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret + b"A",
         chain_key_recv=master_secret + b"B",
     )
-
-    # r -> s: send = master + "B", recv = master + "A"
     SESSIONS[(r, s)] = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret + b"B",
@@ -193,7 +202,6 @@ def message_send(data: MessageSendPayload):
     if key not in SESSIONS:
         return {"error": "session not initialized"}
 
-    # packet = { "nonce_b64": ..., "ct_b64": ... }
     packet = ratchet_encrypt(SESSIONS[key], data.text)
 
     INBOX.setdefault(data.receiver_id, []).append(
@@ -213,7 +221,7 @@ def message_send(data: MessageSendPayload):
 @app.get("/message/poll/{user_id}")
 def poll(user_id: str):
     msgs = INBOX.get(user_id, [])
-    result = []
+    result: List[dict] = []
 
     for item in msgs:
         sender = item["from"]
@@ -221,7 +229,6 @@ def poll(user_id: str):
 
         key = (sender, user_id)
         if key not in SESSIONS:
-            # немає сесії — пропускаємо
             continue
 
         plaintext, new_state = ratchet_decrypt(SESSIONS[key], packet)
@@ -234,8 +241,7 @@ def poll(user_id: str):
             }
         )
 
-    # Zero-trace inbox
-    INBOX[user_id] = []
+    INBOX[user_id] = []  # zero-trace inbox
 
     return {"messages": result}
 
@@ -258,7 +264,7 @@ def receive_message(data: MessagePayload):
 
 # ============================================================
 #   CALL SIGNALING (WebRTC)
-# ============================================================
+// ============================================================
 
 @app.websocket("/call/{user_id}")
 async def call_socket(ws: WebSocket, user_id: str):
