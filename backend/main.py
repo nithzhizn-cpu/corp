@@ -252,7 +252,27 @@ async def call_socket(ws: WebSocket, user_id: str):
     except WebSocketDisconnect:
         CALL_CONNECTIONS.pop(user_id, None)
 
+@app.post("/message/decrypt")
+def message_decrypt(data: dict):
+    sender = data.get("sender_id")
+    receiver = data.get("receiver_id")
+    packet = data.get("package")
 
+    key = (sender, receiver)
+
+    if key not in SESSIONS:
+        return {"error": "session not initialized"}
+
+    state = SESSIONS[key]
+
+    try:
+        plaintext, new_state = ratchet_decrypt(state, packet)
+        SESSIONS[key] = new_state
+        return {"plaintext": plaintext}
+
+    except Exception as e:
+        print("Decrypt error:", e)
+        return {"error": "decrypt_failed"}
 # ==============================================
 #   ZERO TRACE WIPE
 # ==============================================
