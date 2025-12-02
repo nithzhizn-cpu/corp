@@ -5,7 +5,7 @@
 
 import uuid, os, json, base64
 from typing import Dict, Optional, List, Tuple
-from crypto.signal_core import generate_ephemeral_keypair
+
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,6 +132,10 @@ def get_bundle(user_id: str):
 #   SESSION INIT (X3DH)
 # ==============================================
 
+# ==============================================
+#   SESSION INIT (X3DH)
+# ==============================================
+
 @app.post("/session/init")
 def session_init(data: InitiateSessionPayload):
     sender = data.sender_id
@@ -160,15 +164,11 @@ def session_init(data: InitiateSessionPayload):
         onetime_prekey_pub_b64=onetime_prekey_pub_b64
     )
 
-    # === FIXED DOUBLE RATCHET INIT ===
-    dh_pub, dh_priv = generate_ephemeral_keypair()
-
+    # Простий початковий ратчет (симетричний)
     init_state = RatchetState(
         root_key=master_secret,
-        dh_pub=dh_pub,
-        dh_priv=dh_priv,
-        chain_key_send=master_secret + b"send",
-        chain_key_recv=master_secret + b"recv"
+        chain_key_send=master_secret,
+        chain_key_recv=master_secret
     )
 
     SESSIONS[(sender, receiver)] = init_state
@@ -177,8 +177,6 @@ def session_init(data: InitiateSessionPayload):
         "status": "session_established",
         "used_one_time_prekey": bool(onetime_prekey_pub_b64)
     }
-
-
 # ==============================================
 #   SEND MESSAGE (ENCRYPT)
 # ==============================================
