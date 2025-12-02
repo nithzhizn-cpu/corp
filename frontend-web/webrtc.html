@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>Signal v6.2 — WebRTC Call</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body {
+        margin: 0;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+        background: #0a0f14;
+        color: #eee;
+    }
+
+    h2 {
+        text-align: center;
+        margin-bottom: 20px;
+        color: #4cd137;
+        font-weight: 400;
+    }
+
+    .box {
+        max-width: 400px;
+        margin: 0 auto 20px auto;
+        background: #11161d;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #1f2937;
+    }
+
+    input {
+        width: 100%;
+        padding: 10px;
+        margin-top: 8px;
+        border-radius: 8px;
+        border: none;
+        background: #1e272e;
+        color: #eee;
+        outline: none;
+    }
+    input:focus {
+        background: #263038;
+    }
+
+    button {
+        width: 100%;
+        padding: 12px;
+        margin-top: 12px;
+        border: none;
+        border-radius: 8px;
+        background: #4cd137;
+        color: #000;
+        font-size: 16px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+    button:disabled {
+        background: #3a3a3a;
+        color: #aaa;
+    }
+    button:hover:not(:disabled) {
+        background: #44c030;
+    }
+
+    .videos {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 25px;
+        gap: 10px;
+    }
+
+    video {
+        width: 48%;
+        background: #000;
+        border-radius: 8px;
+        border: 1px solid #1f2937;
+    }
+</style>
+</head>
+
+<body>
+
+<h2>Signal v6.2 — WebRTC дзвінки</h2>
+
+<div class="box">
+    <label>Ваш user_id:</label>
+    <input id="my-id" placeholder="введи свій UUID">
+
+    <label>ID співрозмовника:</label>
+    <input id="peer-id" placeholder="введи UUID іншого">
+
+    <button id="btn-connect">Підключити WebSocket</button>
+    <button id="btn-call" disabled>📞 Дзвонити</button>
+    <button id="btn-hangup" disabled>❌ Завершити</button>
+</div>
+
+<div class="videos">
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+</div>
+
+<script src="webrtc.js"></script>
+</body>
+</html>
