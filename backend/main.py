@@ -156,7 +156,7 @@ def session_init(data: InitiateSessionPayload):
         pk = PREKEYS[receiver].pop(0)
         onetime_prekey_pub_b64 = pk["pub_b64"]
 
-    # X3DH master secret
+    # X3DH
     master_secret = x3dh_sender(
         identity_priv_b64=USERS[sender]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
@@ -164,7 +164,7 @@ def session_init(data: InitiateSessionPayload):
         onetime_prekey_pub_b64=onetime_prekey_pub_b64
     )
 
-    # Простий початковий ратчет (симетричний)
+    # SIMPLE symmetric ratchet for stable operation
     init_state = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret,
