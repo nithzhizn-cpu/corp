@@ -3,7 +3,7 @@
 // ==========================================
 
 // ⚠️ ВСТАВ СВІЙ backend WebSocket домен
-const WS_BACKEND = "wss://YOUR_BACKEND_DOMAIN/call";
+const WS_BACKEND = "wss://corp-production-0ac7.up.railway.app/call";
 
 let socket = null;
 let pc = null;
