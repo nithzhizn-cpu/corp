@@ -224,14 +224,11 @@ async function pollOnce() {
     const res = await fetch(apiUrl(`/message/poll/${myId}`));
     const data = await res.json();
     const messages = data.messages || [];
-    for (const m of messages) {
-  const plaintext = await decryptMessage(m.sender_id, myId, m.text);
-  if (plaintext) {
-    appendMsg(plaintext, false);
-  } else {
-    appendMsg("[не вдалося розшифрувати]", false);
-  }
-}
+
+    messages.forEach(m => {
+      appendMsg(m.text, false);
+    });
+
   } catch (err) {
     console.error("poll error:", err);
   }
