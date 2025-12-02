@@ -1,18 +1,9 @@
-# ============================================================
-#   SIGNAL MESSENGER v7 — BACKEND (SYNCED WITH signal_core v6)
-#   FastAPI + X3DH + Symmetric Double Ratchet + ZeroTrace RAM
-#   Secure Messaging + WebRTC Signaling
-# ============================================================
-
-import uuid
-import json
-from typing import Dict, List, Tuple
-
-import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+import uvicorn
+import uuid, json
+from typing import Dict, List, Tuple
 
 from crypto.signal_core import (
     generate_identity,
@@ -21,78 +12,51 @@ from crypto.signal_core import (
     x3dh_sender,
     RatchetState,
     ratchet_encrypt,
-    ratchet_decrypt,
+    ratchet_decrypt
 )
 
 # ============================================================
-#   APP + CORS
+#   APP + CORS (ПРАЦЮЮЧА ВЕРСІЯ)
 # ============================================================
 
-app = FastAPI(title="Signal v7 Backend")
+app = FastAPI()
 
+# 🔥 CORS — працює для ВСІХ методів AUTOMATICALLY
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # У проді — постав домени
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global OPTIONS preflight
-@app.options("/{path:path}")
-async def preflight_handler(path: str):
-    return JSONResponse(
-        status_code=200,
-        content={"ok": True},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        },
-    )
-
-
 # ============================================================
-#   ZERO-TRACE STORAGE (RAM only)
+#   ZERO TRACE STORAGE
 # ============================================================
 
 USERS: Dict[str, dict] = {}
 PREKEYS: Dict[str, List[dict]] = {}
 SESSIONS: Dict[Tuple[str, str], RatchetState] = {}
 INBOX: Dict[str, List[dict]] = {}
-CALL_CONNECTIONS: Dict[str, WebSocket] = {}
-
-ZERO_TRACE_SECRET = "SET_YOUR_SECRET"
-
+CALLS: Dict[str, WebSocket] = {}
 
 # ============================================================
 #   MODELS
 # ============================================================
 
+from pydantic import BaseModel
+
 class RegisterPayload(BaseModel):
     username: str
-
 
 class InitiateSessionPayload(BaseModel):
     sender_id: str
     receiver_id: str
 
-
 class MessageSendPayload(BaseModel):
     sender_id: str
     receiver_id: str
     text: str
-
-
-class MessagePayload(BaseModel):
-    sender_id: str
-    receiver_id: str
-    ciphertext: dict
-
-
-class WipePayload(BaseModel):
-    admin_secret: str
-
 
 # ============================================================
 #   REGISTER
@@ -105,15 +69,7 @@ def register(data: RegisterPayload):
     ident = generate_identity()
     prekeys = generate_onetime_prekeys(20)
 
-    USERS[user_id] = {
-        "username": data.username,
-        "identity_priv_b64": ident["identity_priv_b64"],
-        "identity_pub_b64": ident["identity_pub_b64"],
-        "signed_prekey_priv_b64": ident["signed_prekey_priv_b64"],
-        "signed_prekey_pub_b64": ident["signed_prekey_pub_b64"],
-        "signed_prekey_sig_b64": ident["signed_prekey_sig_b64"],
-    }
-
+    USERS[user_id] = ident
     PREKEYS[user_id] = prekeys
     INBOX[user_id] = []
 
@@ -122,38 +78,17 @@ def register(data: RegisterPayload):
         "identity_pub": ident["identity_pub_b64"],
         "signed_prekey_pub": ident["signed_prekey_pub_b64"],
         "signed_prekey_sig": ident["signed_prekey_sig_b64"],
-        "onetime_prekeys": [pk["pub_b64"] for pk in prekeys],
+        "onetime_prekeys": [pk["pub_b64"] for pk in prekeys]
     }
 
-
 # ============================================================
-#   GET BUNDLE
-# ============================================================
-
-@app.get("/bundle/{user_id}")
-def get_bundle(user_id: str):
-    if user_id not in USERS:
-        return {"error": "invalid user"}
-
-    return {
-        "identity_pub": USERS[user_id]["identity_pub_b64"],
-        "signed_prekey_pub": USERS[user_id]["signed_prekey_pub_b64"],
-        "signed_prekey_sig": USERS[user_id]["signed_prekey_sig_b64"],
-        "onetime_prekeys": [pk["pub_b64"] for pk in PREKEYS.get(user_id, [])],
-    }
-
-
-# ============================================================
-#   INIT SESSION (X3DH + Symmetric Ratchet)
+#   INIT SESSION
 # ============================================================
 
 @app.post("/session/init")
 def session_init(data: InitiateSessionPayload):
     s = data.sender_id
     r = data.receiver_id
-
-    if s not in USERS or r not in USERS:
-        return {"error": "invalid sender/receiver"}
 
     recv_bundle = {
         "identity_pub_b64": USERS[r]["identity_pub_b64"],
@@ -162,37 +97,35 @@ def session_init(data: InitiateSessionPayload):
     }
 
     onetime = None
-    if PREKEYS.get(r):
-        pk = PREKEYS[r].pop(0)
-        onetime = pk["pub_b64"]
+    if PREKEYS[r]:
+        onetime = PREKEYS[r].pop(0)["pub_b64"]
 
-    master_secret = x3dh_sender(
+    secret = x3dh_sender(
         identity_priv_b64=USERS[s]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
         recv_bundle=recv_bundle,
-        onetime_prekey_pub_b64=onetime,
+        onetime_prekey_pub_b64=onetime
     )
 
     SESSIONS[(s, r)] = RatchetState(
-        root_key=master_secret,
-        chain_key_send=master_secret + b"A",
-        chain_key_recv=master_secret + b"B",
+        root_key=secret,
+        chain_key_send=secret + b"A",
+        chain_key_recv=secret + b"B"
     )
     SESSIONS[(r, s)] = RatchetState(
-        root_key=master_secret,
-        chain_key_send=master_secret + b"B",
-        chain_key_recv=master_secret + b"A",
+        root_key=secret,
+        chain_key_send=secret + b"B",
+        chain_key_recv=secret + b"A"
     )
 
-    return {"status": "session_established", "one_time_used": bool(onetime)}
-
+    return {"status": "session_established"}
 
 # ============================================================
 #   SEND MESSAGE
 # ============================================================
 
 @app.post("/message/send")
-def message_send(data: MessageSendPayload):
+def send_message(data: MessageSendPayload):
     key = (data.sender_id, data.receiver_id)
 
     if key not in SESSIONS:
@@ -200,82 +133,37 @@ def message_send(data: MessageSendPayload):
 
     packet = ratchet_encrypt(SESSIONS[key], data.text)
 
-    INBOX.setdefault(data.receiver_id, []).append({
+    INBOX[data.receiver_id].append({
         "from": data.sender_id,
         "packet": packet
     })
 
     return {"status": "sent"}
 
-
 # ============================================================
-#   POLL (DELIVER + DECRYPT)
+#   POLL MESSAGES  (🔥 FIXED CORS)
 # ============================================================
 
 @app.get("/message/poll/{user_id}")
 def poll(user_id: str):
     msgs = INBOX.get(user_id, [])
-    result = []
+    out = []
 
     for item in msgs:
         sender = item["from"]
         packet = item["packet"]
+        session_key = (sender, user_id)
 
-        key = (sender, user_id)
-        if key not in SESSIONS:
-            continue
-
-        plaintext, new_state = ratchet_decrypt(SESSIONS[key], packet)
-        SESSIONS[key] = new_state
-
-        result.append({"from": sender, "text": plaintext})
+        if session_key in SESSIONS:
+            plaintext, new_state = ratchet_decrypt(SESSIONS[session_key], packet)
+            SESSIONS[session_key] = new_state
+            out.append({"from": sender, "text": plaintext})
 
     INBOX[user_id] = []
-    return {"messages": result}
-
-
-# ============================================================
-#   WebRTC SIGNALING
-# ============================================================
-
-@app.websocket("/call/{user_id}")
-async def call_socket(ws: WebSocket, user_id: str):
-    await ws.accept()
-    CALL_CONNECTIONS[user_id] = ws
-
-    try:
-        while True:
-            raw = await ws.receive_text()
-            msg = json.loads(raw)
-            target = msg.get("to")
-
-            if target in CALL_CONNECTIONS:
-                await CALL_CONNECTIONS[target].send_text(raw)
-
-    except WebSocketDisconnect:
-        CALL_CONNECTIONS.pop(user_id, None)
-
+    return {"messages": out}
 
 # ============================================================
-#   WIPE
-# ============================================================
-
-@app.post("/zerotrace/wipe")
-def wipe(data: WipePayload):
-    if data.admin_secret != ZERO_TRACE_SECRET:
-        return {"error": "invalid"}
-
-    USERS.clear()
-    PREKEYS.clear()
-    SESSIONS.clear()
-    INBOX.clear()
-    CALL_CONNECTIONS.clear()
-
-    return {"status": "wiped"}
-
-
-# ============================================================
-#   START SERVER
+#   RUN SERVER
 # ============================================================
 
 if __name__ == "__main__":
