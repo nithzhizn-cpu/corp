@@ -1,0 +1,127 @@
+/* ================================
+   Signal v7 — WebRTC UI Styling
+   Minimalistic encrypted-call style
+================================ */
+
+/* Фон */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: system-ui, Arial, sans-serif;
+    background: #0c0f12;
+    color: #e5e5e5;
+}
+
+/* Контейнер */
+.app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+h2 {
+    text-align: center;
+    font-weight: 600;
+    margin-bottom: 25px;
+    color: #82caff;
+}
+
+/* Поля вводу */
+input {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0 16px 0;
+    background: #1a1f25;
+    border: 1px solid #2b323a;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 15px;
+}
+input:focus {
+    border-color: #4c8dff;
+    outline: none;
+}
+
+/* Кнопки */
+button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 10px;
+    font-size: 16px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    transition: 0.2s ease;
+}
+
+#btn-connect {
+    background: #2b7cff;
+}
+#btn-connect:hover {
+    background: #1d5fd6;
+}
+
+#btn-call {
+    background: #10c469;
+}
+#btn-call:disabled {
+    background: #2d3b2d;
+    cursor: not-allowed;
+}
+#btn-call:hover:not(:disabled) {
+    background: #0da95a;
+}
+
+#btn-hangup {
+    background: #ff4b5c;
+    margin-bottom: 20px;
+}
+#btn-hangup:disabled {
+    background: #3c2325;
+    cursor: not-allowed;
+}
+#btn-hangup:hover:not(:disabled) {
+    background: #d24351;
+}
+
+/* Відео секція */
+.videos {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-top: 25px;
+}
+
+/* Відеоблок */
+.video-box {
+    background: #111418;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid #1f242b;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.video-box span {
+    font-size: 14px;
+    opacity: 0.8;
+    margin-bottom: 6px;
+}
+
+/* Сам відео-потік */
+video {
+    width: 100%;
+    max-height: 260px;
+    background: #000;
+    border-radius: 10px;
+    object-fit: cover;
+}
+
+/* Адаптивність */
+@media (min-width: 700px) {
+    .videos {
+        flex-direction: row;
+    }
+}
