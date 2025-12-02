@@ -2,30 +2,134 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8" />
-  <title>Signal v6 · Корпоративний месенджер</title>
+  <title>Signal v6 · Дзвінки</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f5f5f7;
+      color: #222;
+    }
+
+    h1 {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 26px;
+      font-weight: 700;
+      color: #111;
+    }
+
+    .card {
+      background: #fff;
+      margin: 15px auto;
+      padding: 20px;
+      border-radius: 16px;
+      width: 92%;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 6px;
+      color: #444;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+      margin-bottom: 16px;
+      background: #fafafa;
+      transition: 0.2s;
+    }
+
+    input:focus {
+      border-color: #007aff;
+      outline: none;
+      background: #fff;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 12px;
+      transition: 0.2s;
+    }
+
+    .btn-primary {
+      background: #007aff;
+      color: #fff;
+    }
+
+    .btn-primary:active {
+      background: #0062cc;
+    }
+
+    .btn-red {
+      background: #ff3b30;
+      color: #fff;
+    }
+
+    .btn-red:active {
+      background: #d92a21;
+    }
+
+    .btn[disabled] {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    h2 {
+      margin: 20px 0 10px;
+      font-size: 20px;
+      text-align: center;
+      color: #222;
+    }
+
+    video {
+      width: 92%;
+      height: auto;
+      border-radius: 16px;
+      background: black;
+      margin: 0 auto 20px;
+      display: block;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+  </style>
 </head>
+
 <body>
+
   <h1>Signal v6 · Дзвінки</h1>
 
-  <div>
+  <div class="card">
     <label>Мій ID:</label>
     <input id="my-id" placeholder="user_id" />
-  </div>
-  <div>
+
     <label>ID співрозмовника:</label>
     <input id="peer-id" placeholder="peer user_id" />
+
+    <button id="btn-connect" class="btn btn-primary">Підключитись до сигналінгу</button>
+    <button id="btn-call" class="btn btn-primary" disabled>📞 Подзвонити</button>
+    <button id="btn-hangup" class="btn btn-red" disabled>❌ Завершити</button>
   </div>
 
-  <button id="btn-connect">Підключитись до сигналінгу</button>
-  <button id="btn-call" disabled>📞 Подзвонити</button>
-  <button id="btn-hangup" disabled>❌ Завершити</button>
-
   <h2>Моє відео</h2>
-  <video id="localVideo" autoplay playsinline muted style="width: 300px; background: #000;"></video>
+  <video id="localVideo" autoplay playsinline muted></video>
 
   <h2>Співрозмовник</h2>
-  <video id="remoteVideo" autoplay playsinline style="width: 300px; background: #000;"></video>
+  <video id="remoteVideo" autoplay playsinline></video>
 
   <script src="webrtc.js"></script>
 </body>
