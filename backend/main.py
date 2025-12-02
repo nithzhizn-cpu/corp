@@ -1,7 +1,7 @@
 # ============================================================
-#   SIGNAL MESSENGER v7 — BACKEND
+#   SIGNAL MESSENGER v7 — BACKEND (SYNCED WITH signal_core v6)
 #   FastAPI + X3DH + Symmetric Double Ratchet + ZeroTrace RAM
-#   Secure Messaging + WebRTC Signaling Server
+#   Secure Messaging + WebRTC Signaling
 # ============================================================
 
 import uuid
@@ -17,9 +17,8 @@ from crypto.signal_core import (
     generate_identity,
     generate_onetime_prekeys,
     generate_ephemeral_key_b64,
-    generate_ephemeral_keypair,
     x3dh_sender,
-    RatchetState,
+    RatchetState,        # ⚠ той самий dataclass, що й у signal_core.py
     ratchet_encrypt,
     ratchet_decrypt,
 )
@@ -33,7 +32,7 @@ app = FastAPI(title="Signal v7 Backend")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "*",  # 🔥 дозвіл для всіх фронтів (простий запуск)
+        "*",  # для тестів / фронтів на Railway; в проді краще вказати конкретні домени
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -50,7 +49,7 @@ SESSIONS: Dict[Tuple[str, str], RatchetState] = {}
 INBOX: Dict[str, List[dict]] = {}
 CALL_CONNECTIONS: Dict[str, WebSocket] = {}
 
-ZERO_TRACE_SECRET = "SET_YOUR_SECRET"
+ZERO_TRACE_SECRET = "SET_YOUR_SECRET"  # поміняй на свій
 
 
 # ============================================================
@@ -60,19 +59,23 @@ ZERO_TRACE_SECRET = "SET_YOUR_SECRET"
 class RegisterPayload(BaseModel):
     username: str
 
+
 class InitiateSessionPayload(BaseModel):
     sender_id: str
     receiver_id: str
+
 
 class MessageSendPayload(BaseModel):
     sender_id: str
     receiver_id: str
     text: str
 
+
 class MessagePayload(BaseModel):
     sender_id: str
     receiver_id: str
     ciphertext: dict
+
 
 class WipePayload(BaseModel):
     admin_secret: str
@@ -86,7 +89,7 @@ class WipePayload(BaseModel):
 def register(data: RegisterPayload):
     user_id = str(uuid.uuid4())
 
-    ident = generate_identity()
+    ident = generate_identity()          # повертає *_b64
     prekeys = generate_onetime_prekeys(20)
 
     USERS[user_id] = {
@@ -106,7 +109,7 @@ def register(data: RegisterPayload):
         "identity_pub": ident["identity_pub_b64"],
         "signed_prekey_pub": ident["signed_prekey_pub_b64"],
         "signed_prekey_sig": ident["signed_prekey_sig_b64"],
-        "onetime_prekeys": [pk["pub_b64"] for pk in prekeys]
+        "onetime_prekeys": [pk["pub_b64"] for pk in prekeys],
     }
 
 
@@ -123,12 +126,12 @@ def get_bundle(user_id: str):
         "identity_pub": USERS[user_id]["identity_pub_b64"],
         "signed_prekey_pub": USERS[user_id]["signed_prekey_pub_b64"],
         "signed_prekey_sig": USERS[user_id]["signed_prekey_sig_b64"],
-        "onetime_prekeys": [pk["pub_b64"] for pk in PREKEYS.get(user_id, [])]
+        "onetime_prekeys": [pk["pub_b64"] for pk in PREKEYS.get(user_id, [])],
     }
 
 
 # ============================================================
-#   INIT SIGNAL SESSION (X3DH + Double Ratchet)
+#   INIT SIGNAL SESSION (X3DH + Symmetric Double Ratchet)
 # ============================================================
 
 @app.post("/session/init")
@@ -145,32 +148,39 @@ def session_init(data: InitiateSessionPayload):
         "signed_prekey_sig_b64": USERS[r]["signed_prekey_sig_b64"],
     }
 
+    # One-time prekey
     onetime = None
     if PREKEYS.get(r):
         pk = PREKEYS[r].pop(0)
         onetime = pk["pub_b64"]
 
+    # X3DH master secret (байти)
     master_secret = x3dh_sender(
         identity_priv_b64=USERS[s]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
         recv_bundle=recv_bundle,
-        onetime_prekey_pub_b64=onetime
+        onetime_prekey_pub_b64=onetime,
     )
 
-    dh_pub, dh_priv = generate_ephemeral_keypair()
-
+    # Symmetric double ratchet: два стани, дзеркальні
+    # s -> r: send = master + "A", recv = master + "B"
     SESSIONS[(s, r)] = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret + b"A",
         chain_key_recv=master_secret + b"B",
     )
+
+    # r -> s: send = master + "B", recv = master + "A"
     SESSIONS[(r, s)] = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret + b"B",
         chain_key_recv=master_secret + b"A",
     )
 
-    return {"status": "session_established"}
+    return {
+        "status": "session_established",
+        "used_one_time_prekey": bool(onetime),
+    }
 
 
 # ============================================================
@@ -183,18 +193,21 @@ def message_send(data: MessageSendPayload):
     if key not in SESSIONS:
         return {"error": "session not initialized"}
 
+    # packet = { "nonce_b64": ..., "ct_b64": ... }
     packet = ratchet_encrypt(SESSIONS[key], data.text)
 
-    INBOX[data.receiver_id].append({
-        "from": data.sender_id,
-        "packet": packet
-    })
+    INBOX.setdefault(data.receiver_id, []).append(
+        {
+            "from": data.sender_id,
+            "packet": packet,
+        }
+    )
 
     return {"status": "sent"}
 
 
 # ============================================================
-#   POLL MESSAGES (DELIVER & DECRYPT)
+#   POLL MESSAGES (DELIVER & DECRYPT ON SERVER)
 # ============================================================
 
 @app.get("/message/poll/{user_id}")
@@ -207,13 +220,40 @@ def poll(user_id: str):
         packet = item["packet"]
 
         key = (sender, user_id)
-        if key in SESSIONS:
-            plaintext, new_state = ratchet_decrypt(SESSIONS[key], packet)
-            SESSIONS[key] = new_state
-            result.append({"from": sender, "text": plaintext})
+        if key not in SESSIONS:
+            # немає сесії — пропускаємо
+            continue
 
-    INBOX[user_id] = []  # zero-trace inbox
+        plaintext, new_state = ratchet_decrypt(SESSIONS[key], packet)
+        SESSIONS[key] = new_state
+
+        result.append(
+            {
+                "from": sender,
+                "text": plaintext,
+            }
+        )
+
+    # Zero-trace inbox
+    INBOX[user_id] = []
+
     return {"messages": result}
+
+
+# ============================================================
+#   RAW RECEIVE (debug only)
+# ============================================================
+
+@app.post("/message/receive")
+def receive_message(data: MessagePayload):
+    key = (data.sender_id, data.receiver_id)
+    if key not in SESSIONS:
+        return {"error": "session not initialized"}
+
+    plaintext, new_state = ratchet_decrypt(SESSIONS[key], data.ciphertext)
+    SESSIONS[key] = new_state
+
+    return {"plaintext": plaintext}
 
 
 # ============================================================
