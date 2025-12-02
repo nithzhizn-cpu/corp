@@ -1,251 +1,136 @@
-// =============================
-//   Signal v6 — Chat frontend
-// =============================
+// ===============================
+//   Signal v6.2 — Chat Frontend
+// ===============================
 
-// Якщо бекенд на тому ж домені: залишаємо порожнім
-// Якщо окремий домен на Railway — вкажеш типу "https://your-backend.up.railway.app"
-const API_BASE = "https://corp-production-0ac7.up.railway.app";
+// ⚠️ Пропиши тут свій бекенд:
+const API = "https://YOUR_BACKEND_URL";
 
 // DOM
-const usernameInput = document.getElementById("username");
 const btnRegister = document.getElementById("btn-register");
+const btnSession = document.getElementById("btn-session");
+const btnSend = document.getElementById("send-btn");
+
 const myIdInput = document.getElementById("my-id");
-const myIdBadge = document.getElementById("my-id-badge");
 const peerIdInput = document.getElementById("peer-id");
-const btnInitSession = document.getElementById("btn-init-session");
-const statusEl = document.getElementById("status");
-const chatLog = document.getElementById("chat-log");
-const msgInput = document.getElementById("msg-input");
-const btnSend = document.getElementById("btn-send");
+const textInput = document.getElementById("text-input");
+const messagesBox = document.getElementById("messages");
 
 let myId = null;
-let pollTimer = null;
+let peerId = null;
 
-// ------------------------------
-// Helpers
-// ------------------------------
-function apiUrl(path) {
-  return API_BASE + path;
+// ---------------
+//  UI Helpers
+// ---------------
+function addMessage(text, mine = false) {
+    const div = document.createElement("div");
+    div.className = "msg " + (mine ? "me" : "other");
+    div.textContent = text;
+    messagesBox.appendChild(div);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
-function setStatus(text) {
-  statusEl.textContent = text || "";
-}
-
-function appendMsg(text, fromMe = false) {
-  const div = document.createElement("div");
-  div.className = "msg " + (fromMe ? "me" : "them");
-
-  const meta = document.createElement("div");
-  meta.className = "msg-meta";
-  meta.textContent = fromMe ? "Ти" : "Співрозмовник";
-
-  const body = document.createElement("div");
-  body.textContent = text;
-
-  div.appendChild(meta);
-  div.appendChild(body);
-
-  chatLog.appendChild(div);
-  chatLog.scrollTop = chatLog.scrollHeight;
-}
-
-function saveMyId(id) {
-  myId = id;
-  myIdInput.value = id;
-  myIdBadge.textContent = "user_id: " + id;
-  localStorage.setItem("signal_v6_user_id", id);
-}
-
-function loadMyId() {
-  const stored = localStorage.getItem("signal_v6_user_id");
-  if (stored) {
-    saveMyId(stored);
-  }
-}
-
-// ------------------------------
-// Register
-// ------------------------------
+// -------------------------------
+//   1. Registration
+// -------------------------------
 btnRegister.onclick = async () => {
-  const username = usernameInput.value.trim();
-  if (!username) {
-    alert("Введи username");
-    return;
-  }
+    const username = "user-" + Math.floor(Math.random() * 99999);
 
-  try {
-    setStatus("Реєстрація...");
-    const res = await fetch(apiUrl("/register"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username })
+    const res = await fetch(`${API}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username })
+    });
+
+    if (!res.ok) {
+        alert("❌ Помилка реєстрації");
+        return;
+    }
+
+    const data = await res.json();
+    myId = data.user_id;
+    myIdInput.value = myId;
+
+    btnSession.disabled = false;
+
+    addMessage("✔ Реєстрація успішна! Ваш ID:\n" + myId);
+};
+
+// -------------------------------
+//   2. X3DH + Double Ratchet Init
+// -------------------------------
+btnSession.onclick = async () => {
+    myId = myIdInput.value.trim();
+    peerId = peerIdInput.value.trim();
+
+    if (!myId || !peerId) {
+        alert("Введи свій та чужий ID");
+        return;
+    }
+
+    const res = await fetch(`${API}/session/init`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            sender_id: myId,
+            receiver_id: peerId
+        })
     });
 
     const data = await res.json();
-    if (data.user_id) {
-      saveMyId(data.user_id);
-      setStatus("Зареєстровано. Збережи свій user_id для корпоративного доступу.");
-      btnInitSession.disabled = false;
-      msgInput.disabled = false;
-      btnSend.disabled = false;
-      startPolling();
-    } else {
-      console.error(data);
-      setStatus("Помилка реєстрації.");
+    if (data.error) {
+        alert("Не вдалося створити сесію: " + data.error);
+        return;
     }
-  } catch (err) {
-    console.error(err);
-    setStatus("Помилка мережі.");
-  }
+
+    addMessage("🔐 Secure session established with: " + peerId);
+
+    // даємо змогу писати
+    textInput.disabled = false;
+    btnSend.disabled = false;
+
+    // запускаємо polling
+    startPolling();
 };
 
-// ------------------------------
-// Init session (X3DH)
-// ------------------------------
-btnInitSession.onclick = async () => {
-  if (!myId) {
-    alert("Спочатку зареєструйся.");
-    return;
-  }
-  const peerId = peerIdInput.value.trim();
-  if (!peerId) {
-    alert("Введи ID співрозмовника.");
-    return;
-  }
-
-  try {
-    setStatus("Створення сесії (X3DH)...");
-    const res = await fetch(apiUrl("/session/init"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sender_id: myId,
-        receiver_id: peerId
-      })
-    });
-
-    const data = await res.json();
-    if (data.status === "session_established") {
-      setStatus("Сесія створена. Можна писати зашифровані повідомлення.");
-      msgInput.disabled = false;
-      btnSend.disabled = false;
-    } else {
-      console.error(data);
-      setStatus("Не вдалося створити сесію.");
-    }
-  } catch (err) {
-    console.error(err);
-    setStatus("Помилка мережі при створенні сесії.");
-  }
-};
-
-// ------------------------------
-// Send message
-// ------------------------------
+// -------------------------------
+//   3. Sending encrypted message
+// -------------------------------
 btnSend.onclick = async () => {
-  if (!myId) {
-    alert("Спочатку зареєструйся.");
-    return;
-  }
-  const peerId = peerIdInput.value.trim();
-  if (!peerId) {
-    alert("Введи ID співрозмовника.");
-    return;
-  }
-  const text = msgInput.value.trim();
-  if (!text) return;
+    const text = textInput.value.trim();
+    if (!text) return;
 
-  try {
-    const res = await fetch(apiUrl("/message/send"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sender_id: myId,
-        receiver_id: peerId,
-        text
-      })
+    addMessage(text, true);
+
+    const res = await fetch(`${API}/message/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            sender_id: myId,
+            receiver_id: peerId,
+            text
+        })
     });
 
-    const data = await res.json();
-    if (data.status === "sent") {
-      appendMsg(text, true);
-      msgInput.value = "";
-    } else {
-      console.error(data);
-      setStatus("Не вдалося надіслати повідомлення.");
-    }
-  } catch (err) {
-    console.error(err);
-    setStatus("Помилка мережі при відправленні.");
-  }
+    textInput.value = "";
 };
 
-msgInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    btnSend.click();
-  }
-});
-// =======================
-//  Ratchet decrypt client
-// =======================
+// -------------------------------
+//   4. Polling incoming messages
+// -------------------------------
+async function pollMessages() {
+    if (!myId) return;
 
-// simple wrapper for POST /message/decrypt
-async function decryptMessage(sender_id, receiver_id, encryptedPackage) {
-  try {
-    const res = await fetch(apiUrl("/message/decrypt"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sender_id,
-        receiver_id,
-        package: encryptedPackage
-      })
-    });
+    const res = await fetch(`${API}/message/poll/${myId}`);
+    if (!res.ok) return;
 
     const data = await res.json();
-    if (data.plaintext) return data.plaintext;
+    const msgs = data.messages || [];
 
-    console.warn("Не вдалося розшифрувати:", data);
-    return null;
-  } catch (err) {
-    console.error("decrypt error:", err);
-    return null;
-  }
-}
-// ------------------------------
-// Poll incoming messages
-// ------------------------------
-async function pollOnce() {
-  if (!myId) return;
-
-  try {
-    const res = await fetch(apiUrl(`/message/poll/${myId}`));
-    const data = await res.json();
-    const messages = data.messages || [];
-
-    messages.forEach(m => {
-      appendMsg(m.text, false);
+    msgs.forEach(m => {
+        addMessage(m.from + ": " + m.text, false);
     });
-
-  } catch (err) {
-    console.error("poll error:", err);
-  }
 }
 
 function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(pollOnce, 2000);
-}
-
-// ------------------------------
-// Init on load
-// ------------------------------
-loadMyId();
-if (myId) {
-  btnInitSession.disabled = false;
-  msgInput.disabled = false;
-  btnSend.disabled = false;
-  startPolling();
+    setInterval(pollMessages, 1200);
 }
