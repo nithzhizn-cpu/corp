@@ -4,7 +4,7 @@
 
 // Якщо бекенд на тому ж домені: залишаємо порожнім
 // Якщо окремий домен на Railway — вкажеш типу "https://your-backend.up.railway.app"
-const API_BASE = "";
+const API_BASE = "https://corp-production-0ac7.up.railway.app";
 
 // DOM
 const usernameInput = document.getElementById("username");
