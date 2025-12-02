@@ -19,7 +19,7 @@ from crypto.signal_core import (
     generate_onetime_prekeys,
     generate_ephemeral_key_b64,
     x3dh_sender,
-    RatchetState,        # той самий dataclass, що й у signal_core.py
+    RatchetState,
     ratchet_encrypt,
     ratchet_decrypt,
 )
@@ -32,13 +32,13 @@ app = FastAPI(title="Signal v7 Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # в проді краще вказати конкретні домени
+    allow_origins=["*"],   # У проді — постав домени
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 🔁 Глобальний preflight handler (щоб браузер не падав по OPTIONS)
+# Global OPTIONS preflight
 @app.options("/{path:path}")
 async def preflight_handler(path: str):
     return JSONResponse(
@@ -51,6 +51,7 @@ async def preflight_handler(path: str):
         },
     )
 
+
 # ============================================================
 #   ZERO-TRACE STORAGE (RAM only)
 # ============================================================
@@ -61,11 +62,11 @@ SESSIONS: Dict[Tuple[str, str], RatchetState] = {}
 INBOX: Dict[str, List[dict]] = {}
 CALL_CONNECTIONS: Dict[str, WebSocket] = {}
 
-ZERO_TRACE_SECRET = "SET_YOUR_SECRET"  # поміняй на свій
+ZERO_TRACE_SECRET = "SET_YOUR_SECRET"
 
 
 # ============================================================
-#   Pydantic Models
+#   MODELS
 # ============================================================
 
 class RegisterPayload(BaseModel):
@@ -94,14 +95,14 @@ class WipePayload(BaseModel):
 
 
 # ============================================================
-#   REGISTER USER
+#   REGISTER
 # ============================================================
 
 @app.post("/register")
 def register(data: RegisterPayload):
     user_id = str(uuid.uuid4())
 
-    ident = generate_identity()          # повертає *_b64
+    ident = generate_identity()
     prekeys = generate_onetime_prekeys(20)
 
     USERS[user_id] = {
@@ -143,7 +144,7 @@ def get_bundle(user_id: str):
 
 
 # ============================================================
-#   INIT SIGNAL SESSION (X3DH + Symmetric Double Ratchet)
+#   INIT SESSION (X3DH + Symmetric Ratchet)
 # ============================================================
 
 @app.post("/session/init")
@@ -160,13 +161,11 @@ def session_init(data: InitiateSessionPayload):
         "signed_prekey_sig_b64": USERS[r]["signed_prekey_sig_b64"],
     }
 
-    # One-time prekey
     onetime = None
     if PREKEYS.get(r):
         pk = PREKEYS[r].pop(0)
         onetime = pk["pub_b64"]
 
-    # X3DH master secret (байти)
     master_secret = x3dh_sender(
         identity_priv_b64=USERS[s]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
@@ -174,7 +173,6 @@ def session_init(data: InitiateSessionPayload):
         onetime_prekey_pub_b64=onetime,
     )
 
-    # Symmetric double ratchet: два стани, дзеркальні
     SESSIONS[(s, r)] = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret + b"A",
@@ -186,42 +184,38 @@ def session_init(data: InitiateSessionPayload):
         chain_key_recv=master_secret + b"A",
     )
 
-    return {
-        "status": "session_established",
-        "used_one_time_prekey": bool(onetime),
-    }
+    return {"status": "session_established", "one_time_used": bool(onetime)}
 
 
 # ============================================================
-#   ENCRYPT & SEND MESSAGE
+#   SEND MESSAGE
 # ============================================================
 
 @app.post("/message/send")
 def message_send(data: MessageSendPayload):
     key = (data.sender_id, data.receiver_id)
+
     if key not in SESSIONS:
         return {"error": "session not initialized"}
 
     packet = ratchet_encrypt(SESSIONS[key], data.text)
 
-    INBOX.setdefault(data.receiver_id, []).append(
-        {
-            "from": data.sender_id,
-            "packet": packet,
-        }
-    )
+    INBOX.setdefault(data.receiver_id, []).append({
+        "from": data.sender_id,
+        "packet": packet
+    })
 
     return {"status": "sent"}
 
 
 # ============================================================
-#   POLL MESSAGES (DELIVER & DECRYPT ON SERVER)
+#   POLL (DELIVER + DECRYPT)
 # ============================================================
 
 @app.get("/message/poll/{user_id}")
 def poll(user_id: str):
     msgs = INBOX.get(user_id, [])
-    result: List[dict] = []
+    result = []
 
     for item in msgs:
         sender = item["from"]
@@ -234,37 +228,15 @@ def poll(user_id: str):
         plaintext, new_state = ratchet_decrypt(SESSIONS[key], packet)
         SESSIONS[key] = new_state
 
-        result.append(
-            {
-                "from": sender,
-                "text": plaintext,
-            }
-        )
+        result.append({"from": sender, "text": plaintext})
 
-    INBOX[user_id] = []  # zero-trace inbox
-
+    INBOX[user_id] = []
     return {"messages": result}
 
 
 # ============================================================
-#   RAW RECEIVE (debug only)
+#   WebRTC SIGNALING
 # ============================================================
-
-@app.post("/message/receive")
-def receive_message(data: MessagePayload):
-    key = (data.sender_id, data.receiver_id)
-    if key not in SESSIONS:
-        return {"error": "session not initialized"}
-
-    plaintext, new_state = ratchet_decrypt(SESSIONS[key], data.ciphertext)
-    SESSIONS[key] = new_state
-
-    return {"plaintext": plaintext}
-
-
-# ============================================================
-#   CALL SIGNALING (WebRTC)
-// ============================================================
 
 @app.websocket("/call/{user_id}")
 async def call_socket(ws: WebSocket, user_id: str):
@@ -285,7 +257,7 @@ async def call_socket(ws: WebSocket, user_id: str):
 
 
 # ============================================================
-#   ZERO-TRACE WIPE
+#   WIPE
 # ============================================================
 
 @app.post("/zerotrace/wipe")
@@ -303,7 +275,7 @@ def wipe(data: WipePayload):
 
 
 # ============================================================
-#   START SERVER (dev only)
+#   START SERVER
 # ============================================================
 
 if __name__ == "__main__":
