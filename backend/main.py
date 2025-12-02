@@ -27,9 +27,15 @@ from crypto.signal_core import (
 
 app = FastAPI(title="Signal v6 Backend")
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В проді вкажи свій домен
+    allow_origins=[
+        "https://meticulous-creation-production-bdf0.up.railway.app",
+        "https://*.up.railway.app",
+        "*"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
