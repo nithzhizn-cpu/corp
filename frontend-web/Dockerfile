@@ -1,8 +1,11 @@
 FROM nginx:alpine
 
-RUN rm -rf /usr/share/nginx/html/*
+WORKDIR /usr/share/nginx/html
 
-COPY . /usr/share/nginx/html
+COPY index.html .
+COPY chat.html .
+COPY chat.js .
+COPY webrtc.js .
 
 EXPOSE 80
 
