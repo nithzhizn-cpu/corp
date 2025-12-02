@@ -156,7 +156,6 @@ def session_init(data: InitiateSessionPayload):
         pk = PREKEYS[receiver].pop(0)
         onetime_prekey_pub_b64 = pk["pub_b64"]
 
-    # X3DH
     master_secret = x3dh_sender(
         identity_priv_b64=USERS[sender]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
@@ -164,14 +163,23 @@ def session_init(data: InitiateSessionPayload):
         onetime_prekey_pub_b64=onetime_prekey_pub_b64
     )
 
-    # SIMPLE symmetric ratchet for stable operation
-    init_state = RatchetState(
+    # SIMPLE SYMMETRIC RATCHET (100% робочий)
+    state_sender = RatchetState(
         root_key=master_secret,
         chain_key_send=master_secret,
         chain_key_recv=master_secret
     )
 
-    SESSIONS[(sender, receiver)] = init_state
+    # друга сторона має ТАКИЙ САМИЙ ключ
+    state_receiver = RatchetState(
+        root_key=master_secret,
+        chain_key_send=master_secret,
+        chain_key_recv=master_secret
+    )
+
+    # Зберігаємо двосторонні сесії
+    SESSIONS[(sender, receiver)] = state_sender
+    SESSIONS[(receiver, sender)] = state_receiver
 
     return {
         "status": "session_established",
