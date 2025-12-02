@@ -1,7 +1,6 @@
 # ============================================================
-#   SIGNAL MESSENGER v7 — BACKEND (SYNCED WITH signal_core v7)
-#   FastAPI + X25519 + X3DH-подібний master_secret
-#   Спрощений Symmetric "Ratchet" + ZeroTrace RAM
+#   SIGNAL MESSENGER v7 — BACKEND (SYNCED WITH signal_core v6)
+#   FastAPI + X3DH + Symmetric Double Ratchet + ZeroTrace RAM
 #   Secure Messaging + WebRTC Signaling
 # ============================================================
 
@@ -14,14 +13,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from cryptography.exceptions import InvalidTag
 
 from crypto.signal_core import (
     generate_identity,
     generate_onetime_prekeys,
     generate_ephemeral_key_b64,
     x3dh_sender,
-    RatchetState,        # dataclass з signal_core
+    RatchetState,
     ratchet_encrypt,
     ratchet_decrypt,
 )
@@ -32,18 +30,21 @@ from crypto.signal_core import (
 
 app = FastAPI(title="Signal v7 Backend")
 
-# ⚠ У проді краще вказати конкретні домени фронтенду
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,        # з "*" краще без credentials
+    allow_origins=["*"],          # в проді краще вказати конкретні домени
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Додатковий preflight-хендлер (на всякий випадок)
+
 @app.options("/{path:path}")
 async def preflight_handler(path: str):
+    """
+    Глобальний handler для OPTIONS (CORS preflight),
+    щоб браузер не сипався на /message/poll тощо.
+    """
     return JSONResponse(
         status_code=200,
         content={"ok": True},
@@ -69,6 +70,7 @@ ZERO_TRACE_SECRET = "SET_YOUR_SECRET"  # поміняй на свій
 # ============================================================
 #   Pydantic Models
 # ============================================================
+
 
 class RegisterPayload(BaseModel):
     username: str
@@ -96,33 +98,21 @@ class WipePayload(BaseModel):
 
 
 # ============================================================
-#   HEALTHCHECK (зручно тестити Railway)
-# ============================================================
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-# ============================================================
 #   REGISTER USER
 # ============================================================
 
 @app.post("/register")
 def register(data: RegisterPayload):
     """
-    Реєстрація нового юзера:
-    - генеруємо identity + signed prekey + prekeys
-    - кладемо все в RAM
-    - повертаємо user_id + bundle (на майбутнє)
+    Реєстрація по ніку (username).
     """
     user_id = str(uuid.uuid4())
 
-    ident = generate_identity()          # повертає *_b64
+    ident = generate_identity()
     prekeys = generate_onetime_prekeys(20)
 
     USERS[user_id] = {
-        "username": data.username,
+        "username": data.username,                # 👈 зберігаємо нік
         "identity_priv_b64": ident["identity_priv_b64"],
         "identity_pub_b64": ident["identity_pub_b64"],
         "signed_prekey_priv_b64": ident["signed_prekey_priv_b64"],
@@ -135,6 +125,7 @@ def register(data: RegisterPayload):
 
     return {
         "user_id": user_id,
+        "username": data.username,                # 👈 віддаємо нік назад
         "identity_pub": ident["identity_pub_b64"],
         "signed_prekey_pub": ident["signed_prekey_pub_b64"],
         "signed_prekey_sig": ident["signed_prekey_sig_b64"],
@@ -143,7 +134,7 @@ def register(data: RegisterPayload):
 
 
 # ============================================================
-#   GET BUNDLE (якщо треба буде на фронті)
+#   GET BUNDLE
 # ============================================================
 
 @app.get("/bundle/{user_id}")
@@ -160,18 +151,11 @@ def get_bundle(user_id: str):
 
 
 # ============================================================
-#   INIT SIGNAL SESSION (X3DH → shared root_key)
+#   INIT SIGNAL SESSION (X3DH + Symmetric Double Ratchet)
 # ============================================================
 
 @app.post("/session/init")
 def session_init(data: InitiateSessionPayload):
-    """
-    Ініціалізація сесії між sender_id (s) і receiver_id (r).
-
-    Ми робимо X3DH «від імені» sender'а, отримуємо master_secret
-    і цей же master_secret використовуємо для обох напрямків
-    (s→r і r→s) як root_key, щоб не було розʼїзду ключів.
-    """
     s = data.sender_id
     r = data.receiver_id
 
@@ -184,13 +168,11 @@ def session_init(data: InitiateSessionPayload):
         "signed_prekey_sig_b64": USERS[r]["signed_prekey_sig_b64"],
     }
 
-    # One-time prekey (з'їдається один раз)
     onetime = None
     if PREKEYS.get(r):
         pk = PREKEYS[r].pop(0)
         onetime = pk["pub_b64"]
 
-    # X3DH master secret (байти)
     master_secret = x3dh_sender(
         identity_priv_b64=USERS[s]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
@@ -198,9 +180,16 @@ def session_init(data: InitiateSessionPayload):
         onetime_prekey_pub_b64=onetime,
     )
 
-    # Спрощений "ratchet": один root_key, без chain_key_send/recv
-    SESSIONS[(s, r)] = RatchetState(root_key=master_secret)
-    SESSIONS[(r, s)] = RatchetState(root_key=master_secret)
+    SESSIONS[(s, r)] = RatchetState(
+        root_key=master_secret,
+        chain_key_send=master_secret + b"A",
+        chain_key_recv=master_secret + b"B",
+    )
+    SESSIONS[(r, s)] = RatchetState(
+        root_key=master_secret,
+        chain_key_send=master_secret + b"B",
+        chain_key_recv=master_secret + b"A",
+    )
 
     return {
         "status": "session_established",
@@ -214,15 +203,11 @@ def session_init(data: InitiateSessionPayload):
 
 @app.post("/message/send")
 def message_send(data: MessageSendPayload):
-    """
-    Шифруємо повідомлення від sender → receiver
-    і кладемо в INBOX[receiver] як packet (nonce+ct).
-    """
-    session_key = (data.sender_id, data.receiver_id)
-    if session_key not in SESSIONS:
+    key = (data.sender_id, data.receiver_id)
+    if key not in SESSIONS:
         return {"error": "session not initialized"}
 
-    packet = ratchet_encrypt(SESSIONS[session_key], data.text)
+    packet = ratchet_encrypt(SESSIONS[key], data.text)
 
     INBOX.setdefault(data.receiver_id, []).append(
         {
@@ -240,16 +225,6 @@ def message_send(data: MessageSendPayload):
 
 @app.get("/message/poll/{user_id}")
 def poll(user_id: str):
-    """
-    Клієнт періодично опитує цей endpoint.
-    Ми:
-      - забираємо всі пакети з INBOX[user_id],
-      - для кожного:
-          • знаходимо сесію (sender,user_id),
-          • пробуємо decrypt,
-          • якщо все ок — додаємо у result.
-      - INBOX[user_id] очищаємо (zero-trace).
-    """
     msgs = INBOX.get(user_id, [])
     result: List[dict] = []
 
@@ -257,53 +232,42 @@ def poll(user_id: str):
         sender = item["from"]
         packet = item["packet"]
 
-        session_key = (sender, user_id)
-        if session_key not in SESSIONS:
-            # немає сесії – просто скіпаємо
+        key = (sender, user_id)
+        if key not in SESSIONS:
             continue
 
-        try:
-            plaintext, new_state = ratchet_decrypt(SESSIONS[session_key], packet)
-            # new_state зараз такий самий (root_key не міняється),
-            # але на всякий випадок оновимо:
-            SESSIONS[session_key] = new_state
+        plaintext, new_state = ratchet_decrypt(SESSIONS[key], packet)
+        SESSIONS[key] = new_state
 
-            result.append(
-                {
-                    "from": sender,
-                    "text": plaintext,
-                }
-            )
-        except InvalidTag:
-            # хтось змінив пакет / ключі не співпали – скіпаємо
-            print(f"[WARN] InvalidTag decrypt from={sender} to={user_id}")
-            continue
-        except Exception as e:
-            print(f"[ERROR] decrypt error from={sender} to={user_id}: {e}")
-            continue
+        username = USERS.get(sender, {}).get("username", sender)
 
-    # Zero-trace після доставки
+        result.append(
+            {
+                "from": sender,
+                "from_name": username,     # 👈 додаємо нік відправника
+                "text": plaintext,
+            }
+        )
+
     INBOX[user_id] = []
 
     return {"messages": result}
 
 
 # ============================================================
-#   RAW RECEIVE (debug only) — необов'язково використовувати
+#   RAW RECEIVE (debug only)
 # ============================================================
 
 @app.post("/message/receive")
 def receive_message(data: MessagePayload):
-    session_key = (data.sender_id, data.receiver_id)
-    if session_key not in SESSIONS:
+    key = (data.sender_id, data.receiver_id)
+    if key not in SESSIONS:
         return {"error": "session not initialized"}
 
-    try:
-        plaintext, new_state = ratchet_decrypt(SESSIONS[session_key], data.ciphertext)
-        SESSIONS[session_key] = new_state
-        return {"plaintext": plaintext}
-    except Exception as e:
-        return {"error": str(e)}
+    plaintext, new_state = ratchet_decrypt(SESSIONS[key], data.ciphertext)
+    SESSIONS[key] = new_state
+
+    return {"plaintext": plaintext}
 
 
 # ============================================================
@@ -312,15 +276,8 @@ def receive_message(data: MessagePayload):
 
 @app.websocket("/call/{user_id}")
 async def call_socket(ws: WebSocket, user_id: str):
-    """
-    Простий сигналінг для WebRTC:
-    - кожен юзер відкриває ws /call/{user_id}
-    - повідомлення типу { type, from, to, data } ретранслюються
-      на інший ws з тим самим "to".
-    """
     await ws.accept()
     CALL_CONNECTIONS[user_id] = ws
-    print(f"[WS] connected: {user_id}")
 
     try:
         while True:
@@ -330,16 +287,13 @@ async def call_socket(ws: WebSocket, user_id: str):
 
             if target in CALL_CONNECTIONS:
                 await CALL_CONNECTIONS[target].send_text(raw)
+
     except WebSocketDisconnect:
-        print(f"[WS] disconnected: {user_id}")
-        CALL_CONNECTIONS.pop(user_id, None)
-    except Exception as e:
-        print(f"[WS] error for {user_id}: {e}")
         CALL_CONNECTIONS.pop(user_id, None)
 
 
 # ============================================================
-#   ZERO-TRACE WIPE (admin)
+#   ZERO-TRACE WIPE
 # ============================================================
 
 @app.post("/zerotrace/wipe")
@@ -361,6 +315,4 @@ def wipe(data: WipePayload):
 # ============================================================
 
 if __name__ == "__main__":
-    # локально запускаєш так:
-    #   python main.py
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
