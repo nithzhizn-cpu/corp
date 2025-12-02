@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <title>Signal v6 · Дзвінки</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
+<body>
+  <h1>Signal v6 · Відеодзвінки</h1>
+
+  <div>
+    <label>Мій ID:</label>
+    <input id="my-id" placeholder="user_id" />
+  </div>
+  <div>
+    <label>ID співрозмовника:</label>
+    <input id="peer-id" placeholder="peer user_id" />
+  </div>
+
+  <button id="btn-connect">Підключитись до сигналінгу</button>
+  <button id="btn-call" disabled>📞 Подзвонити</button>
+  <button id="btn-hangup" disabled>❌ Завершити</button>
+
+  <h2>Моє відео</h2>
+  <video id="localVideo" autoplay playsinline muted style="width: 300px; background: #000;"></video>
+
+  <h2>Співрозмовник</h2>
+  <video id="remoteVideo" autoplay playsinline style="width: 300px; background: #000;"></video>
+
+  <script src="webrtc.js"></script>
+</body>
+</html>

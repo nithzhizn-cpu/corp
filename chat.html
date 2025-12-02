@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <title>Signal v6 · Чат</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+  /* styles omitted for brevity in this environment, already provided in logic */
+  </style>
+</head>
+<body>
+  <!-- Спрощено: ти можеш замінити цю версію на повну зі стилями з попереднього кроку -->
+  <h1>Signal v6 · Чат</h1>
+  <div>
+    <input id="username" placeholder="username" />
+    <button id="btn-register">Реєстрація</button>
+  </div>
+  <div>
+    <label>Мій user_id:</label>
+    <input id="my-id" readonly />
+  </div>
+  <div>
+    <label>Співрозмовник (user_id):</label>
+    <input id="peer-id" />
+    <button id="btn-init-session">Створити сесію</button>
+  </div>
+  <div id="status"></div>
+  <hr />
+  <div id="chat-log" style="border:1px solid #ccc; height:200px; overflow-y:auto;"></div>
+  <input id="msg-input" placeholder="Повідомлення..." />
+  <button id="btn-send">Надіслати</button>
+
+  <script src="chat.js"></script>
+</body>
+</html>
