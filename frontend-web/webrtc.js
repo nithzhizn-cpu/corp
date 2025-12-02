@@ -31,8 +31,8 @@ btnConnect.onclick = async () => {
   }
 
   // 1. WebSocket на бек
-  const ws = new WebSocket(`wss://corp-production-0ac7.up.railway.app/call/${userId}`);
-  socket = new WebSocket(wsUrl);
+  const WS_URL = "wss://corp-production-0ac7.up.railway.app/call";
+  const ws = new WebSocket(`${WS_URL}/${userId}`);
 
   socket.onopen = () => {
     console.log("🔌 WebSocket connected");
