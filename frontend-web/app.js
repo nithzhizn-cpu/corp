@@ -1,16 +1,19 @@
 // ========================================================
-//   Signal Messenger v6.2 — App.js 
-//   Single frontend controller for Chat + WebRTC
+//   Signal Messenger v7 — App.js (оновлений під backend v7)
 // ========================================================
 
-// ⚙️ Backend URL (замінити!)
+// ⚙️ Backend URL
 const API = "https://corp-production-0ac7.up.railway.app";
+const WS_BACKEND = "wss://corp-production-0ac7.up.railway.app/call";
 
 // ==============================
 //   Global state
 // ==============================
 let myId = null;
+let myName = null;
+
 let peerId = null;
+let peerName = null;
 
 let ws = null;
 let pc = null;
@@ -58,7 +61,7 @@ function error(msg) {
 //   1. Registration
 // ==============================
 ui.btnRegister.onclick = async () => {
-    const username = "user-" + Math.floor(Math.random() * 99999);
+    const username = prompt("Введи свій нікнейм:") || ("user-" + Math.floor(Math.random() * 99999));
 
     const res = await fetch(`${API}/register`, {
         method: "POST",
@@ -69,16 +72,18 @@ ui.btnRegister.onclick = async () => {
     if (!res.ok) return error("Помилка реєстрації");
 
     const data = await res.json();
+    
     myId = data.user_id;
+    myName = username;
 
     ui.myIdInput.value = myId;
     ui.btnSession.disabled = false;
 
-    logMsg("✔ Реєстрація успішна. Ваш ID:\n" + myId);
+    logMsg(`✔ Зареєстровано як ${username}\nВаш ID: ${myId}`);
 };
 
 // ==============================
-//   2. X3DH + Double Ratchet Init
+//   2. Session Init (X3DH)
 // ==============================
 ui.btnSession.onclick = async () => {
     myId = ui.myIdInput.value.trim();
@@ -111,7 +116,7 @@ ui.btnSend.onclick = async () => {
     const text = ui.msgInput.value.trim();
     if (text === "") return;
 
-    logMsg("Ви: " + text, true);
+    logMsg(`${myName}: ${text}`, true);
 
     await fetch(`${API}/message/send`, {
         method: "POST",
@@ -138,7 +143,7 @@ async function poll() {
     const data = await res.json();
 
     for (const msg of data.messages) {
-        logMsg(msg.from + ": " + msg.text, false);
+        logMsg(`${msg.from_name}: ${msg.text}`, false);
     }
 }
 
@@ -152,16 +157,13 @@ function startPolling() {
 const rtcConfig = {
     iceServers: [
         { urls: "stun:stun.l.google.com:19302" }
-        // Тут додається TURN сервер
     ]
 };
 
 ui.btnConnect.onclick = () => {
-    const uid = ui.myIdInput.value.trim();
-    if (!uid) return error("Спочатку введи свій ID");
+    if (!myId) return error("Спочатку зареєструйся");
 
-    const wsUrl = `wss://YOUR_BACKEND_URL/call/${uid}`;
-    ws = new WebSocket(wsUrl);
+    ws = new WebSocket(`${WS_BACKEND}/${myId}`);
 
     ws.onopen = () => {
         console.log("WS connected");
@@ -192,14 +194,13 @@ ui.btnConnect.onclick = () => {
 };
 
 // -------------------------
-//   Create PeerConnection
+//   Create Peer Connection
 // -------------------------
 async function createPeer(targetId) {
     peerId = targetId;
 
     pc = new RTCPeerConnection(rtcConfig);
 
-    // Media
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     ui.localVideo.srcObject = localStream;
 
@@ -218,7 +219,7 @@ async function createPeer(targetId) {
 //   Start Call
 // -------------------------
 ui.btnCall.onclick = async () => {
-    if (!peerIdInput.value.trim()) return error("Введи peer ID!");
+    if (!peerIdInput.value.trim()) return error("Введи peer ID");
 
     peerId = peerIdInput.value.trim();
 
@@ -257,6 +258,9 @@ function sendSignal(type, to, data) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     ws.send(JSON.stringify({
-        type, from: myId, to, data
+        type,
+        from: myId,
+        to,
+        data
     }));
 }
