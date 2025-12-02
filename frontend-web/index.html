@@ -107,6 +107,29 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
   </style>
+  <script>
+document.addEventListener("DOMContentLoaded", () => {
+  const url = new URL(window.location.href);
+  const peer = url.searchParams.get("peer");
+
+  const myIdInput = document.getElementById("my-id");
+  const peerIdInput = document.getElementById("peer-id");
+
+  // якщо peer=... є в адресі — автоматично підставляємо
+  if (peer) {
+    peerIdInput.value = peer;
+  }
+
+  // Генеруємо лінк для запрошення після того як користувач ввів свій ID
+  myIdInput.addEventListener("change", () => {
+    const myId = myIdInput.value.trim();
+    if (myId) {
+      const inviteUrl = `${window.location.origin}/?peer=${myId}`;
+      alert("Посилання для запрошення:\n\n" + inviteUrl);
+    }
+  });
+});
+</script>
 </head>
 
 <body>
