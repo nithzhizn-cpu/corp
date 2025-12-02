@@ -3,7 +3,7 @@
 // ===============================
 
 // ⚠️ Пропиши тут свій бекенд:
-const API = "https://YOUR_BACKEND_URL";
+const API = "https://corp-production-0ac7.up.railway.app";
 
 // DOM
 const btnRegister = document.getElementById("btn-register");
