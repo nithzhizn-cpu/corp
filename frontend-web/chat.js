@@ -187,7 +187,33 @@ msgInput.addEventListener("keydown", (e) => {
     btnSend.click();
   }
 });
+// =======================
+//  Ratchet decrypt client
+// =======================
 
+// simple wrapper for POST /message/decrypt
+async function decryptMessage(sender_id, receiver_id, encryptedPackage) {
+  try {
+    const res = await fetch(apiUrl("/message/decrypt"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sender_id,
+        receiver_id,
+        package: encryptedPackage
+      })
+    });
+
+    const data = await res.json();
+    if (data.plaintext) return data.plaintext;
+
+    console.warn("Не вдалося розшифрувати:", data);
+    return null;
+  } catch (err) {
+    console.error("decrypt error:", err);
+    return null;
+  }
+}
 // ------------------------------
 // Poll incoming messages
 // ------------------------------
@@ -198,9 +224,14 @@ async function pollOnce() {
     const res = await fetch(apiUrl(`/message/poll/${myId}`));
     const data = await res.json();
     const messages = data.messages || [];
-    messages.forEach((m) => {
-      appendMsg(m.text, false);
-    });
+    for (const m of messages) {
+  const plaintext = await decryptMessage(m.sender_id, myId, m.text);
+  if (plaintext) {
+    appendMsg(plaintext, false);
+  } else {
+    appendMsg("[не вдалося розшифрувати]", false);
+  }
+}
   } catch (err) {
     console.error("poll error:", err);
   }
