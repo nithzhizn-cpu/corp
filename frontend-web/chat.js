@@ -1,158 +1,167 @@
 // ===============================
-//   Signal v7 — Chat Frontend
-//   Fully Fixed + CORS Safe
+//   Signal v6.2 — Chat Frontend
 // ===============================
 
-// ⚠️ Пропиши URL бекенду:
+// Пропиши свій бекенд:
 const API = "https://corp-production-0ac7.up.railway.app";
 
 // DOM
 const btnRegister = document.getElementById("btn-register");
-const btnSession = document.getElementById("btn-session");
-const btnSend = document.getElementById("send-btn");
+const btnSession  = document.getElementById("btn-session");
+const btnSend     = document.getElementById("send-btn");
 
-const myIdInput = document.getElementById("my-id");
+const myIdInput   = document.getElementById("my-id");
 const peerIdInput = document.getElementById("peer-id");
-const textInput = document.getElementById("text-input");
+const nickInput   = document.getElementById("nick-input");   // 👈 інпут з ніком
+
+const textInput   = document.getElementById("text-input");
 const messagesBox = document.getElementById("messages");
 
-let myId = null;
+let myId   = null;
 let peerId = null;
 
-// -------------------------------
-//  UI Helper
-// -------------------------------
+// ---------------
+//  UI Helpers
+// ---------------
 function addMessage(text, mine = false) {
-    const div = document.createElement("div");
-    div.className = "msg " + (mine ? "me" : "other");
-    div.textContent = text;
-    messagesBox.appendChild(div);
-    messagesBox.scrollTop = messagesBox.scrollHeight;
+  const div = document.createElement("div");
+  div.className = "msg " + (mine ? "me" : "other");
+  div.textContent = text;
+  messagesBox.appendChild(div);
+  messagesBox.scrollTop = messagesBox.scrollHeight;
 }
 
 // -------------------------------
-//  1. Registration
+//   1. Registration by nickname
 // -------------------------------
 btnRegister.onclick = async () => {
-    const username = "user-" + Math.floor(Math.random() * 99999);
+  const username = (nickInput.value || "").trim();
 
-    try {
-        const res = await fetch(`${API}/register`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username })
-        });
+  if (!username) {
+    alert("Введи нікнейм перед реєстрацією");
+    return;
+  }
 
-        if (!res.ok) throw new Error("Registration failed");
+  try {
+    const res = await fetch(`${API}/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username })
+    });
 
-        const data = await res.json();
-
-        myId = data.user_id;
-        myIdInput.value = myId;
-        btnSession.disabled = false;
-
-        addMessage("✔ Реєстрація успішна! Ваш ID:\n" + myId);
-    } catch (err) {
-        console.error(err);
-        alert("❌ Помилка реєстрації (CORS або бекенд не працює)");
+    if (!res.ok) {
+      alert("❌ Помилка реєстрації (бекенд недоступний)");
+      return;
     }
+
+    const data = await res.json();
+    if (!data.user_id) {
+      console.error(data);
+      alert("❌ Помилка реєстрації (немає user_id)");
+      return;
+    }
+
+    myId = data.user_id;
+    myIdInput.value = myId;
+
+    btnSession.disabled = false;
+
+    addMessage(`✔ Реєстрація успішна! Нік: ${username}\nID: ${myId}`);
+  } catch (e) {
+    console.error(e);
+    alert("❌ Помилка мережі при реєстрації");
+  }
 };
 
 // -------------------------------
-//  2. Create X3DH + Double Ratchet session
+//   2. X3DH + Double Ratchet Init
 // -------------------------------
 btnSession.onclick = async () => {
-    myId = myIdInput.value.trim();
-    peerId = peerIdInput.value.trim();
+  myId   = myIdInput.value.trim();
+  peerId = peerIdInput.value.trim();
 
-    if (!myId || !peerId) {
-        alert("Введи свій ID і ID абонента");
-        return;
+  if (!myId || !peerId) {
+    alert("Введи свій ID і ID співрозмовника");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/session/init`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sender_id: myId,
+        receiver_id: peerId
+      })
+    });
+
+    const data = await res.json();
+    if (data.error) {
+      alert("Не вдалося створити сесію: " + data.error);
+      return;
     }
 
-    try {
-        const res = await fetch(`${API}/session/init`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                sender_id: myId,
-                receiver_id: peerId
-            })
-        });
+    addMessage("🔐 Secure Session Established → " + peerId);
 
-        const data = await res.json();
-        if (data.error) {
-            alert("❌ Помилка створення сесії: " + data.error);
-            return;
-        }
+    textInput.disabled = false;
+    btnSend.disabled = false;
 
-        addMessage("🔐 Secure Session Established → " + peerId);
-
-        textInput.disabled = false;
-        btnSend.disabled = false;
-
-        startPolling();
-    } catch (err) {
-        console.error(err);
-        alert("❌ Помилка встановлення сесії (CORS або бекенд)");
-    }
+    startPolling();
+  } catch (e) {
+    console.error(e);
+    alert("❌ Помилка мережі при створенні сесії");
+  }
 };
 
 // -------------------------------
-//  3. Send encrypted message
+//   3. Sending encrypted message
 // -------------------------------
 btnSend.onclick = async () => {
-    const text = textInput.value.trim();
-    if (!text) return;
+  const text = textInput.value.trim();
+  if (!text) return;
 
-    addMessage(text, true);
+  addMessage(text, true);
 
-    try {
-        await fetch(`${API}/message/send`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                sender_id: myId,
-                receiver_id: peerId,
-                text
-            })
-        });
-    } catch (err) {
-        console.error(err);
-        alert("❌ Помилка надсилання");
-    }
+  try {
+    await fetch(`${API}/message/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sender_id: myId,
+        receiver_id: peerId,
+        text
+      })
+    });
+  } catch (e) {
+    console.error(e);
+    addMessage("⚠ Не вдалося надіслати (мережа)", true);
+  }
 
-    textInput.value = "";
+  textInput.value = "";
 };
 
 // -------------------------------
-//  4. Poll incoming messages
+//   4. Polling incoming messages
 // -------------------------------
 async function pollMessages() {
-    if (!myId) return;
+  if (!myId) return;
 
-    try {
-        const res = await fetch(`${API}/message/poll/${myId}`, {
-            method: "GET",
-            headers: { "Accept": "application/json" }
-        });
+  try {
+    const res = await fetch(`${API}/message/poll/${myId}`);
+    if (!res.ok) return;
 
-        if (!res.ok) {
-            console.warn("❌ pollMessages error:", res.status);
-            return;
-        }
+    const data = await res.json();
+    const msgs = data.messages || [];
 
-        const data = await res.json();
-        const msgs = data.messages || [];
-
-        msgs.forEach(m => {
-            addMessage(`${m.from}: ${m.text}`, false);
-        });
-    } catch (err) {
-        console.warn("Polling error:", err);
-    }
+    msgs.forEach(m => {
+      const name = m.from_name || m.from || "unknown";
+      addMessage(`${name}: ${m.text}`, false);
+    });
+  } catch (e) {
+    console.error("Polling error:", e);
+  }
 }
 
 function startPolling() {
-    setInterval(pollMessages, 1200);
+  setInterval(pollMessages, 1200);
 }
