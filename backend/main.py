@@ -5,7 +5,7 @@
 
 import uuid, os, json, base64
 from typing import Dict, Optional, List, Tuple
-
+from crypto.signal_core import generate_ephemeral_keypair
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,6 +152,7 @@ def session_init(data: InitiateSessionPayload):
         pk = PREKEYS[receiver].pop(0)
         onetime_prekey_pub_b64 = pk["pub_b64"]
 
+    # X3DH master secret
     master_secret = x3dh_sender(
         identity_priv_b64=USERS[sender]["identity_priv_b64"],
         eph_priv_b64=generate_ephemeral_key_b64(),
@@ -159,11 +160,15 @@ def session_init(data: InitiateSessionPayload):
         onetime_prekey_pub_b64=onetime_prekey_pub_b64
     )
 
-    # Стартовий стан ратчета
+    # === FIXED DOUBLE RATCHET INIT ===
+    dh_pub, dh_priv = generate_ephemeral_keypair()
+
     init_state = RatchetState(
         root_key=master_secret,
-        chain_key_send=master_secret,
-        chain_key_recv=master_secret
+        dh_pub=dh_pub,
+        dh_priv=dh_priv,
+        chain_key_send=master_secret + b"send",
+        chain_key_recv=master_secret + b"recv"
     )
 
     SESSIONS[(sender, receiver)] = init_state
