@@ -1,5 +1,5 @@
 // =============================
-//   Signal v6 — WebRTC клієнт
+//   Signal v6 — WebRTC клієнт (FIXED v6.2)
 // =============================
 
 let socket = null;
@@ -14,28 +14,26 @@ const peerIdInput = document.getElementById("peer-id");
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
-// ⚙️ Налаштування STUN/TURN
-// Для продакшну — сюди додаєш свій TURN-сервер (coturn / paid)
+// STUN/TURN
 const rtcConfig = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" }
-    // { urls: "turn:YOUR_TURN_SERVER:3478", username: "user", credential: "pass" }
   ]
 };
 
+// ------------------------------------
+// CONNECT
+// ------------------------------------
 btnConnect.onclick = async () => {
   const myId = myIdInput.value.trim();
-  if (!myId) {
-    alert("Введи свій user_id (з /register).");
-    return;
-  }
+  if (!myId) return alert("Введи свій user_id");
 
-  // 1. WebSocket на бек
   const WS_URL = "wss://corp-production-0ac7.up.railway.app/call";
-  const ws = new WebSocket(`${WS_URL}/${userId}`);
+
+  socket = new WebSocket(`${WS_URL}/${myId}`);
 
   socket.onopen = () => {
-    console.log("🔌 WebSocket connected");
+    console.log("🔌 WS connected");
     btnCall.disabled = false;
   };
 
@@ -43,13 +41,9 @@ btnConnect.onclick = async () => {
     const msg = JSON.parse(event.data);
     console.log("📨 Signal:", msg);
 
-    const type = msg.type;
-    const from = msg.from;
-    const data = msg.data;
+    const { type, from, data } = msg;
 
-    if (!pc) {
-      await createPeerConnection(from);
-    }
+    if (!pc) await createPeerConnection(from);
 
     if (type === "offer") {
       await pc.setRemoteDescription(new RTCSessionDescription(data));
@@ -57,32 +51,32 @@ btnConnect.onclick = async () => {
       await pc.setLocalDescription(answer);
 
       sendSignal("answer", from, answer);
+
     } else if (type === "answer") {
       await pc.setRemoteDescription(new RTCSessionDescription(data));
+
     } else if (type === "ice") {
-      try {
+      if (data) {
         await pc.addIceCandidate(new RTCIceCandidate(data));
-      } catch (err) {
-        console.error("Error adding ICE:", err);
       }
+
     } else if (type === "hangup") {
       endCall();
     }
   };
 
   socket.onclose = () => {
-    console.log("🔌 WebSocket closed");
-    btnCall.disabled = true;
-    btnHangup.disabled = true;
+    console.log("🔌 WS closed");
+    endCall();
   };
 };
 
+// ------------------------------------
+// CALL
+// ------------------------------------
 btnCall.onclick = async () => {
   const peerId = peerIdInput.value.trim();
-  if (!peerId) {
-    alert("Введи peer_id співрозмовника.");
-    return;
-  }
+  if (!peerId) return alert("Введи peer_id");
 
   await createPeerConnection(peerId);
 
@@ -90,56 +84,57 @@ btnCall.onclick = async () => {
   await pc.setLocalDescription(offer);
 
   sendSignal("offer", peerId, offer);
-
   btnHangup.disabled = false;
 };
 
+// ------------------------------------
+// HANGUP
+// ------------------------------------
 btnHangup.onclick = () => {
   const peerId = peerIdInput.value.trim();
-  if (peerId && socket && socket.readyState === WebSocket.OPEN) {
-    sendSignal("hangup", peerId, {});
-  }
+  sendSignal("hangup", peerId, {});
   endCall();
 };
 
+// ------------------------------------
+// PEER CONNECTION
+// ------------------------------------
 async function createPeerConnection(peerId) {
   if (pc) return;
 
   pc = new RTCPeerConnection(rtcConfig);
 
-  // Локальний медіа-потік
+  // Local media
   if (!localStream) {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: true
+        video: true,
+        audio: true
       });
       localVideo.srcObject = localStream;
-    } catch (err) {
-      console.error("getUserMedia error:", err);
-      alert("Не вдалося отримати доступ до камери/мікрофона");
+    } catch (e) {
+      console.error("Media error", e);
+      alert("Камера/мікрофон недоступні");
       return;
     }
   }
 
-  localStream.getTracks().forEach((track) => {
-    pc.addTrack(track, localStream);
-  });
+  localStream.getTracks().forEach(track =>
+    pc.addTrack(track, localStream)
+  );
 
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      sendSignal("ice", peerId, event.candidate);
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate) {
+      sendSignal("ice", peerId, ev.candidate);
     }
   };
 
-  pc.ontrack = (event) => {
-    console.log("📺 Remote track");
-    remoteVideo.srcObject = event.streams[0];
+  pc.ontrack = (ev) => {
+    remoteVideo.srcObject = ev.streams[0];
   };
 
   pc.onconnectionstatechange = () => {
-    console.log("PC state:", pc.connectionState);
-    if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+    if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
       endCall();
     }
   };
@@ -147,27 +142,23 @@ async function createPeerConnection(peerId) {
   btnHangup.disabled = false;
 }
 
+// ------------------------------------
+// SEND SIGNAL
+// ------------------------------------
 function sendSignal(type, to, data) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
-  const myId = myIdInput.value.trim();
+  const from = myIdInput.value.trim();
 
-  const msg = {
-    type,
-    from: myId,
-    to,
-    data
-  };
-
-  socket.send(JSON.stringify(msg));
+  socket.send(JSON.stringify({ type, from, to, data }));
 }
 
+// ------------------------------------
+// END CALL
+// ------------------------------------
 function endCall() {
   if (pc) {
-    pc.ontrack = null;
-    pc.onicecandidate = null;
-    pc.onconnectionstatechange = null;
-    pc.getSenders().forEach((s) => s.track && s.track.stop());
+    pc.getSenders().forEach(s => s.track && s.track.stop());
     pc.close();
     pc = null;
   }
